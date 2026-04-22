@@ -1,0 +1,39 @@
+name: Staging probe
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install boxd CLI
+        run: |
+          curl -fsSL https://boxd.sh/downloads/cli/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: TCP reachability :9443
+        run: |
+          set +e
+          echo "checking boxd-stg.sh:9443 over TCP (5s timeout)..."
+          nc -vz -w 5 boxd-stg.sh 9443
+          echo "exit=$?"
+
+      - name: Exchange API key for JWT (tests :443)
+        env:
+          BOXD_API_KEY: ${{ secrets.BOXD_API_KEY }}
+        run: |
+          set -e
+          resp=$(curl -fsSL -X POST https://boxd-stg.sh/api/v1/auth/token \
+            -H 'Content-Type: application/json' \
+            -d "{\"api_key\":\"$BOXD_API_KEY\"}")
+          jwt=$(echo "$resp" | jq -r .token)
+          [[ -n "$jwt" && "$jwt" != "null" ]] || { echo "key exchange failed: $resp"; exit 1; }
+          echo "::add-mask::$jwt"
+          echo "BOXD_TOKEN=$jwt" >> "$GITHUB_ENV"
+          echo "exchange OK — token masked + exported"
+
+      - name: boxd list against staging (tests :9443 + auth)
+        run: |
+          set -e
+          boxd --api-url https://boxd-stg.sh --token "$BOXD_TOKEN" list
