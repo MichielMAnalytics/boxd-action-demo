@@ -36,6 +36,11 @@ describe('GET /api/notes', () => {
 });
 
 describe('DELETE /api/notes/:id', () => {
+  it('returns 404 when the note does not exist', async () => {
+    const res = await request(app).delete('/api/notes/99999');
+    expect(res.status).toBe(404);
+  });
+
   it('removes an existing note', async () => {
     const created = await request(app).post('/api/notes').send({ text: 'zap' });
     const id = created.body.id;

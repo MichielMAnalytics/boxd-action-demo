@@ -32,7 +32,8 @@ export function createApp() {
   app.delete('/api/notes/:id', (req, res) => {
     const id = Number(req.params.id);
     const idx = notes.findIndex((n) => n.id === id);
-    if (idx !== -1) notes.splice(idx, 1);
+    if (idx === -1) return res.status(404).json({ error: 'note not found' });
+    notes.splice(idx, 1);
     res.status(200).end();
   });
 
