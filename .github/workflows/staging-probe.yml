@@ -11,45 +11,10 @@ jobs:
         run: |
           curl -fsSL https://boxd.sh/downloads/cli/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: DNS
-        run: |
-          echo "getent ahostsv4 boxd-stg.sh:"; getent ahostsv4 boxd-stg.sh || true
-          echo "getent ahostsv6 boxd-stg.sh:"; getent ahostsv6 boxd-stg.sh || true
-          echo "dig A:";    dig +short A boxd-stg.sh    || true
-          echo "dig AAAA:"; dig +short AAAA boxd-stg.sh || true
-
-      - name: TCP connect (v4 + v6)
-        run: |
-          set +e
-          echo "nc -4 -vz boxd-stg.sh 9443:"
-          nc -4 -vz -w 5 boxd-stg.sh 9443; echo "exit=$?"
-          echo
-          echo "nc -6 -vz boxd-stg.sh 9443:"
-          nc -6 -vz -w 5 boxd-stg.sh 9443; echo "exit=$?"
-
-      - name: PMTU (tracepath)
-        run: |
-          set +e
-          tracepath -n boxd-stg.sh || true
-
-      - name: h2c curl (plaintext HTTP/2, same as CLI)
-        run: |
-          set +e
-          curl -v --http2-prior-knowledge --max-time 10 http://boxd-stg.sh:9443/ 2>&1 | tail -40
-          echo "h2c exit=$?"
-
-      - name: TLS on 9443 (is the server actually TLS?)
-        run: |
-          set +e
-          curl -vk --http2 --max-time 10 https://boxd-stg.sh:9443/ 2>&1 | tail -40
-          echo "tls exit=$?"
-
-      - name: openssl s_client on 9443 (TLS handshake attempt)
-        run: |
-          set +e
-          timeout 8 openssl s_client -connect boxd-stg.sh:9443 -alpn h2 -servername boxd-stg.sh </dev/null 2>&1 | head -40
-          echo "openssl exit=$?"
+          curl -fsSL -o /tmp/grpcurl.tar.gz https://github.com/fullstorydev/grpcurl/releases/download/v1.9.1/grpcurl_1.9.1_linux_x86_64.tar.gz
+          tar -xzf /tmp/grpcurl.tar.gz -C /tmp grpcurl
+          sudo mv /tmp/grpcurl /usr/local/bin/grpcurl
+          grpcurl -version
 
       - name: Exchange API key for JWT
         env:
@@ -59,15 +24,45 @@ jobs:
           jwt=$(curl -fsSL -X POST https://boxd-stg.sh/api/v1/auth/token \
             -H 'Content-Type: application/json' \
             -d "{\"api_key\":\"$BOXD_API_KEY\"}" | jq -r .token)
-          [[ -n "$jwt" && "$jwt" != "null" ]] || { echo "key exchange failed"; exit 1; }
           echo "::add-mask::$jwt"
           echo "BOXD_TOKEN=$jwt" >> "$GITHUB_ENV"
 
-      - name: boxd list with RUST_LOG=debug
-        env:
-          RUST_LOG: debug
-          RUST_BACKTRACE: 1
+      - name: grpcurl list services (reflection over h2c)
         run: |
           set +e
-          boxd --api-url https://boxd-stg.sh --token "$BOXD_TOKEN" list 2>&1 | tail -60
-          echo "cli exit=$?"
+          grpcurl -plaintext -max-time 10 boxd-stg.sh:9443 list 2>&1
+          echo "exit=$?"
+
+      - name: grpcurl list BoxdApi methods
+        run: |
+          set +e
+          grpcurl -plaintext -max-time 10 boxd-stg.sh:9443 list boxd.api.v1.BoxdApi 2>&1
+          echo "exit=$?"
+
+      - name: grpcurl real RPC — ListVms (tests full auth'd call)
+        run: |
+          set +e
+          grpcurl -plaintext -max-time 10 \
+            -H "authorization: Bearer $BOXD_TOKEN" \
+            -d '{}' \
+            boxd-stg.sh:9443 boxd.api.v1.BoxdApi/ListVms 2>&1 | head -30
+          echo "exit=$?"
+
+      - name: boxd list — first try
+        run: |
+          set +e
+          boxd --api-url https://boxd-stg.sh --token "$BOXD_TOKEN" list 2>&1
+          echo "exit=$?"
+
+      - name: boxd list — second try (is it a cold-start flake?)
+        run: |
+          set +e
+          boxd --api-url https://boxd-stg.sh --token "$BOXD_TOKEN" list 2>&1
+          echo "exit=$?"
+
+      - name: boxd list — third try after a brief pause
+        run: |
+          set +e
+          sleep 3
+          boxd --api-url https://boxd-stg.sh --token "$BOXD_TOKEN" list 2>&1
+          echo "exit=$?"
