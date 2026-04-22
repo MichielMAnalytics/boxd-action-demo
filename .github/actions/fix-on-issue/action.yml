@@ -1,0 +1,105 @@
+name: 'boxd — fix issue with Claude'
+description: 'Spin up a boxd VM, run Claude Code to fix a labeled GitHub issue, and open a PR.'
+author: 'boxd'
+
+inputs:
+  boxd-token:
+    description: 'Boxd auth token (from `boxd login`; read from credentials.json)'
+    required: true
+  anthropic-api-key:
+    description: 'Anthropic API key for Claude Code'
+    required: true
+  github-token:
+    description: 'GitHub token with contents:write + pull-requests:write'
+    required: true
+    default: ${{ github.token }}
+  label:
+    description: 'Only run if this label is present on the issue'
+    required: false
+    default: 'claude-fix'
+  vm-timeout-secs:
+    description: 'Destroy the VM after this many seconds if still running'
+    required: false
+    default: '1800'
+  max-turns:
+    description: 'Max Claude agent turns'
+    required: false
+    default: '40'
+
+outputs:
+  pr-url:
+    description: 'URL of the PR opened by Claude'
+    value: ${{ steps.open-pr.outputs.pr-url }}
+  vm-name:
+    description: 'Name of the ephemeral boxd VM'
+    value: ${{ steps.create-vm.outputs.vm-name }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Guard — label present
+      id: guard
+      shell: bash
+      run: |
+        set -euo pipefail
+        labels='${{ toJSON(github.event.issue.labels) }}'
+        target='${{ inputs.label }}'
+        if ! echo "$labels" | jq -e --arg t "$target" '.[] | select(.name == $t)' >/dev/null; then
+          echo "Label '$target' not present — skipping."
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Install boxd CLI
+      if: steps.guard.outputs.skip != 'true'
+      shell: bash
+      run: ${{ github.action_path }}/scripts/install-boxd.sh
+
+    - name: Create VM and run Claude
+      if: steps.guard.outputs.skip != 'true'
+      id: create-vm
+      shell: bash
+      env:
+        BOXD_TOKEN: ${{ inputs.boxd-token }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        ISSUE_NUMBER: ${{ github.event.issue.number }}
+        ISSUE_TITLE: ${{ github.event.issue.title }}
+        ISSUE_BODY: ${{ github.event.issue.body }}
+        REPO_CLONE_URL: ${{ github.event.repository.clone_url }}
+        VM_TIMEOUT_SECS: ${{ inputs.vm-timeout-secs }}
+        MAX_TURNS: ${{ inputs.max-turns }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: ${{ github.action_path }}/scripts/run-claude.sh
+
+    - name: Apply patch and open PR
+      if: steps.guard.outputs.skip != 'true' && steps.create-vm.outputs.has-patch == 'true'
+      id: open-pr
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        ISSUE_NUMBER: ${{ github.event.issue.number }}
+        ISSUE_TITLE: ${{ github.event.issue.title }}
+        PATCH_FILE: ${{ steps.create-vm.outputs.patch-file }}
+        BRANCH_NAME: claude-fix/issue-${{ github.event.issue.number }}
+      run: |
+        set -euo pipefail
+        git config user.name "boxd-bot"
+        git config user.email "boxd-bot@users.noreply.github.com"
+        git checkout -b "$BRANCH_NAME"
+        git am "$PATCH_FILE"
+        git push origin "$BRANCH_NAME"
+        pr_url=$(gh pr create \
+          --title "Claude: fix #$ISSUE_NUMBER — $ISSUE_TITLE" \
+          --body "Closes #$ISSUE_NUMBER. Authored by Claude Code in a boxd VM." \
+          --head "$BRANCH_NAME")
+        echo "pr-url=$pr_url" >> "$GITHUB_OUTPUT"
+
+    - name: Destroy VM
+      if: always() && steps.create-vm.outputs.vm-name != ''
+      shell: bash
+      env:
+        BOXD_TOKEN: ${{ inputs.boxd-token }}
+      run: |
+        set -eu
+        boxd destroy "${{ steps.create-vm.outputs.vm-name }}" -y || true
