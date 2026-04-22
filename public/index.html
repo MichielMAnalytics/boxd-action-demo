@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>quick notes</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      }
+      body {
+        max-width: 32rem;
+        margin: 3rem auto;
+        padding: 0 1rem;
+        line-height: 1.5;
+      }
+      h1 { font-size: 1.25rem; margin-bottom: 1.5rem; }
+      form { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+      input { flex: 1; padding: 0.5rem 0.75rem; font: inherit; }
+      button { padding: 0.5rem 1rem; font: inherit; cursor: pointer; }
+      ul { list-style: none; padding: 0; }
+      li {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.5rem 0;
+        border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+      }
+      li:last-child { border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent); }
+      .meta { opacity: 0.6; font-size: 0.8rem; }
+      .delete { background: none; border: 1px solid currentColor; border-radius: 4px; opacity: 0.6; }
+      .delete:hover { opacity: 1; }
+      .empty { opacity: 0.6; font-style: italic; }
+    </style>
+  </head>
+  <body>
+    <h1>quick notes</h1>
+    <form id="add">
+      <input id="text" placeholder="write a note..." autocomplete="off" required />
+      <button type="submit">add</button>
+    </form>
+    <ul id="notes"></ul>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

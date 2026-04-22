@@ -2,12 +2,13 @@
   "name": "boxd-action-demo",
   "version": "1.0.0",
   "description": "Demo repo for the [boxd fix-on-issue GitHub Action](https://github.com/azin-tech/boxd/tree/main/integrations/github-actions/fix-on-issue).",
-  "main": "index.js",
+  "main": "server.js",
   "directories": {
     "test": "tests"
   },
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "start": "node server.js"
   },
   "repository": {
     "type": "git",
@@ -22,6 +23,7 @@
   },
   "homepage": "https://github.com/MichielMAnalytics/boxd-action-demo#readme",
   "devDependencies": {
+    "supertest": "^7.2.2",
     "vitest": "^4.1.5"
   },
   "dependencies": {
