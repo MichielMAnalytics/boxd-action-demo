@@ -7,33 +7,67 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Install boxd CLI
+      - name: Install boxd CLI + grpcurl
         run: |
           curl -fsSL https://boxd.sh/downloads/cli/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: TCP reachability :9443
+      - name: DNS
+        run: |
+          echo "getent ahostsv4 boxd-stg.sh:"; getent ahostsv4 boxd-stg.sh || true
+          echo "getent ahostsv6 boxd-stg.sh:"; getent ahostsv6 boxd-stg.sh || true
+          echo "dig A:";    dig +short A boxd-stg.sh    || true
+          echo "dig AAAA:"; dig +short AAAA boxd-stg.sh || true
+
+      - name: TCP connect (v4 + v6)
         run: |
           set +e
-          echo "checking boxd-stg.sh:9443 over TCP (5s timeout)..."
-          nc -vz -w 5 boxd-stg.sh 9443
-          echo "exit=$?"
+          echo "nc -4 -vz boxd-stg.sh 9443:"
+          nc -4 -vz -w 5 boxd-stg.sh 9443; echo "exit=$?"
+          echo
+          echo "nc -6 -vz boxd-stg.sh 9443:"
+          nc -6 -vz -w 5 boxd-stg.sh 9443; echo "exit=$?"
 
-      - name: Exchange API key for JWT (tests :443)
+      - name: PMTU (tracepath)
+        run: |
+          set +e
+          tracepath -n boxd-stg.sh || true
+
+      - name: h2c curl (plaintext HTTP/2, same as CLI)
+        run: |
+          set +e
+          curl -v --http2-prior-knowledge --max-time 10 http://boxd-stg.sh:9443/ 2>&1 | tail -40
+          echo "h2c exit=$?"
+
+      - name: TLS on 9443 (is the server actually TLS?)
+        run: |
+          set +e
+          curl -vk --http2 --max-time 10 https://boxd-stg.sh:9443/ 2>&1 | tail -40
+          echo "tls exit=$?"
+
+      - name: openssl s_client on 9443 (TLS handshake attempt)
+        run: |
+          set +e
+          timeout 8 openssl s_client -connect boxd-stg.sh:9443 -alpn h2 -servername boxd-stg.sh </dev/null 2>&1 | head -40
+          echo "openssl exit=$?"
+
+      - name: Exchange API key for JWT
         env:
           BOXD_API_KEY: ${{ secrets.BOXD_API_KEY }}
         run: |
           set -e
-          resp=$(curl -fsSL -X POST https://boxd-stg.sh/api/v1/auth/token \
+          jwt=$(curl -fsSL -X POST https://boxd-stg.sh/api/v1/auth/token \
             -H 'Content-Type: application/json' \
-            -d "{\"api_key\":\"$BOXD_API_KEY\"}")
-          jwt=$(echo "$resp" | jq -r .token)
-          [[ -n "$jwt" && "$jwt" != "null" ]] || { echo "key exchange failed: $resp"; exit 1; }
+            -d "{\"api_key\":\"$BOXD_API_KEY\"}" | jq -r .token)
+          [[ -n "$jwt" && "$jwt" != "null" ]] || { echo "key exchange failed"; exit 1; }
           echo "::add-mask::$jwt"
           echo "BOXD_TOKEN=$jwt" >> "$GITHUB_ENV"
-          echo "exchange OK — token masked + exported"
 
-      - name: boxd list against staging (tests :9443 + auth)
+      - name: boxd list with RUST_LOG=debug
+        env:
+          RUST_LOG: debug
+          RUST_BACKTRACE: 1
         run: |
-          set -e
-          boxd --api-url https://boxd-stg.sh --token "$BOXD_TOKEN" list
+          set +e
+          boxd --api-url https://boxd-stg.sh --token "$BOXD_TOKEN" list 2>&1 | tail -60
+          echo "cli exit=$?"
