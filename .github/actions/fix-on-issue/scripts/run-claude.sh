@@ -102,7 +102,7 @@ echo "::endgroup::"
 echo "::group::Run Claude"
 # Export ANTHROPIC_API_KEY in the VM via an in-shell assignment; we can't
 # pass env via the current proto's Exec, so inline it.
-exec_in_vm "cd ${WORKDIR} && export ANTHROPIC_API_KEY='${ANTHROPIC_API_KEY}' && cat .claude-prompt.md | claude -p --max-turns ${MAX_TURNS} 2>&1 | tee .claude.log"
+exec_in_vm "cd ${WORKDIR} && export ANTHROPIC_API_KEY='${ANTHROPIC_API_KEY}' && cat .claude-prompt.md | claude -p --max-turns ${MAX_TURNS} --dangerously-skip-permissions 2>&1 | tee .claude.log"
 echo "::endgroup::"
 
 # ── Check for commits; extract patch ─────────────────────────────────
