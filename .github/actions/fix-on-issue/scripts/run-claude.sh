@@ -30,11 +30,14 @@ grpc_call() {
 }
 
 # exec_in_vm "<bash command>" — runs via streaming Exec RPC.
+# The remote default shell is dash (sh) — wrap in bash -lc so bash
+# features ([[, arrays, pipefail, etc.) are available.
 # Echoes stdout+stderr to our stdout. Returns the VM-side exit code.
 exec_in_vm() {
   local cmd=$1
+  local wrapped="bash -lc $(printf %q "${cmd}")"
   local msg out data rc
-  msg=$(jq -nc --arg vm "${FORK_ID}" --arg cmd "${cmd}" '{vm_id:$vm,command:$cmd}')
+  msg=$(jq -nc --arg vm "${FORK_ID}" --arg cmd "${wrapped}" '{vm_id:$vm,command:$cmd}')
   out=$(printf '%s' "${msg}" | grpcurl -plaintext -emit-defaults \
     -max-time "${VM_TIMEOUT_SECS}" \
     -H "authorization: Bearer ${BOXD_JWT}" \
