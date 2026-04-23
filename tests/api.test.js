@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { readFileSync } from 'fs';
 import request from 'supertest';
 import { createApp } from '../server.js';
 
@@ -32,6 +33,13 @@ describe('GET /api/notes', () => {
     await request(app).post('/api/notes').send({ text: 'two' });
     const res = await request(app).get('/api/notes');
     expect(res.body.map((n) => n.text)).toEqual(['one', 'two']);
+  });
+});
+
+describe('frontend empty state', () => {
+  it('shows friendly copy when notes list is empty', () => {
+    const src = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+    expect(src).toContain('no notes yet — add your first one! ✨');
   });
 });
 

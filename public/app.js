@@ -13,7 +13,7 @@ function render(notes) {
   if (notes.length === 0) {
     const li = document.createElement('li');
     li.className = 'empty';
-    li.textContent = 'no notes yet';
+    li.textContent = 'no notes yet — add your first one! ✨';
     notesEl.appendChild(li);
     return;
   }
