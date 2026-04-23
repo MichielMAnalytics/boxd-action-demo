@@ -124,30 +124,13 @@ runs:
         raw_base="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${BRANCH_NAME}"
         if git cat-file -e "${BRANCH_NAME}:.claude-screenshots/before.png" 2>/dev/null \
           && git cat-file -e "${BRANCH_NAME}:.claude-screenshots/after.png" 2>/dev/null; then
-          shots=$(cat <<MD
-
-### Visual diff
-
-| Before | After |
-|:---:|:---:|
-| ![before](${raw_base}/.claude-screenshots/before.png) | ![after](${raw_base}/.claude-screenshots/after.png) |
-MD
-)
+          shots=$(printf '\n### Visual diff\n\n| Before | After |\n|:---:|:---:|\n| ![before](%s/.claude-screenshots/before.png) | ![after](%s/.claude-screenshots/after.png) |\n' "$raw_base" "$raw_base")
         elif git cat-file -e "${BRANCH_NAME}:.claude-screenshots/after.png" 2>/dev/null; then
-          shots=$(cat <<MD
-
-### Screenshot
-
-![after](${raw_base}/.claude-screenshots/after.png)
-MD
-)
+          shots=$(printf '\n### Screenshot\n\n![after](%s/.claude-screenshots/after.png)\n' "$raw_base")
         fi
+        body="Closes #$ISSUE_NUMBER. Authored by Claude Code in a boxd VM."
+        [[ -n "$shots" ]] && body="${body}"$'\n'"${shots}"
 
-        body=$(cat <<MD
-Closes #$ISSUE_NUMBER. Authored by Claude Code in a boxd VM.
-${shots}
-MD
-)
         pr_url=$(gh pr create \
           --title "Claude: fix #$ISSUE_NUMBER — $ISSUE_TITLE" \
           --body "$body" \
