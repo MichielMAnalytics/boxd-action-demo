@@ -16,5 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/fix-on-issue
         with:
-          boxd-token: ${{ secrets.BOXD_TOKEN }}
+          boxd-api-key: ${{ secrets.BOXD_API_KEY }}
+          boxd-api-url: https://boxd-stg.sh
+          golden-vm: red-rock
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}

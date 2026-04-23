@@ -2,8 +2,10 @@
 set -euo pipefail
 
 # ── Inputs (from env) ────────────────────────────────────────────────
-: "${BOXD_TOKEN:?}"
+: "${BOXD_JWT:?}"
+: "${BOXD_GRPC_HOST:?}"
 : "${ANTHROPIC_API_KEY:?}"
+: "${GOLDEN_VM:?}"
 : "${ISSUE_NUMBER:?}"
 : "${ISSUE_TITLE:?}"
 : "${ISSUE_BODY:?}"
@@ -11,63 +13,120 @@ set -euo pipefail
 : "${MAX_TURNS:=40}"
 : "${ACTION_PATH:?}"
 
-GOLDEN_VM="boxd-action-demo-golden"
 VM_NAME="claude-fix-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 WORKDIR="/home/boxd/boxd-action-demo"
 PATCH_LOCAL="${RUNNER_TEMP}/claude.mbox"
 
 echo "vm-name=${VM_NAME}" >> "$GITHUB_OUTPUT"
 
-# ── Fork golden VM ───────────────────────────────────────────────────
-echo "::group::Fork golden VM ${GOLDEN_VM} → ${VM_NAME}"
-boxd fork "${GOLDEN_VM}" --name "${VM_NAME}"
-# Poll `boxd list --json` until the fork reports running.
+# ── gRPC helpers ─────────────────────────────────────────────────────
+
+grpc_call() {
+  local method=$1 body=$2
+  grpcurl -plaintext -max-time 120 \
+    -H "authorization: Bearer ${BOXD_JWT}" \
+    -d "${body}" \
+    "${BOXD_GRPC_HOST}" "boxd.api.v1.BoxdApi/${method}"
+}
+
+# exec_in_vm "<bash command>" — runs via streaming Exec RPC.
+# Echoes stdout+stderr to our stdout. Returns the VM-side exit code.
+exec_in_vm() {
+  local cmd=$1
+  local msg out data rc
+  msg=$(jq -nc --arg vm "${FORK_ID}" --arg cmd "${cmd}" '{vm_id:$vm,command:$cmd}')
+  out=$(printf '%s' "${msg}" | grpcurl -plaintext -emit-defaults \
+    -max-time "${VM_TIMEOUT_SECS}" \
+    -H "authorization: Bearer ${BOXD_JWT}" \
+    -d @ \
+    "${BOXD_GRPC_HOST}" boxd.api.v1.BoxdApi/Exec 2>&1) || {
+      echo "!! grpc Exec failed:" >&2
+      echo "${out}" >&2
+      return 127
+    }
+  # Reassemble stdout (and stderr, interleaved) from base64 data chunks.
+  data=$(echo "${out}" | jq -s -r 'map(.data // "") | join("")')
+  if [[ -n "${data}" ]]; then
+    echo "${data}" | base64 -d 2>/dev/null || echo "${data}"
+  fi
+  rc=$(echo "${out}" | jq -s 'last.exitCode // 0')
+  return "${rc}"
+}
+
+# ── Resolve golden VM id ─────────────────────────────────────────────
+echo "::group::Resolve golden ${GOLDEN_VM}"
+GOLDEN_ID=$(grpc_call ListVms '{}' | jq -r --arg n "${GOLDEN_VM}" '.vms[] | select(.name==$n) | .vmId')
+[[ -n "${GOLDEN_ID}" ]] || { echo "golden VM '${GOLDEN_VM}' not found"; exit 1; }
+echo "golden_id=${GOLDEN_ID}"
+echo "::endgroup::"
+
+# ── Fork golden ──────────────────────────────────────────────────────
+echo "::group::Fork → ${VM_NAME}"
+fork_req=$(jq -nc --arg src "${GOLDEN_ID}" --arg name "${VM_NAME}" '{source_vm_id:$src,name:$name}')
+fork_resp=$(grpc_call ForkVm "${fork_req}")
+FORK_ID=$(echo "${fork_resp}" | jq -r .vmId)
+[[ -n "${FORK_ID}" ]] || { echo "fork failed: ${fork_resp}"; exit 1; }
+echo "fork-id=${FORK_ID}" >> "$GITHUB_OUTPUT"
+echo "fork_id=${FORK_ID}"
+echo "::endgroup::"
+
+# ── Poll until fork is running ───────────────────────────────────────
+echo "::group::Wait for fork running"
+status=""
 for i in $(seq 1 60); do
-  status=$(boxd list --json | jq -r --arg n "${VM_NAME}" '.[] | select(.name==$n) | .status')
-  echo "  [${i}] status=${status:-<none>}"
+  status=$(grpc_call GetVm "$(jq -nc --arg id "${FORK_ID}" '{vm_id:$id}')" | jq -r .status)
+  echo "  [${i}] status=${status}"
   [[ "${status}" == "running" ]] && break
   sleep 2
 done
-[[ "${status}" == "running" ]] || { echo "VM never reached running"; exit 1; }
+[[ "${status}" == "running" ]] || { echo "fork never reached running"; exit 1; }
 echo "::endgroup::"
 
-# ── Sync repo to latest main ─────────────────────────────────────────
+# ── Sync repo to origin/main + npm install ───────────────────────────
 echo "::group::Sync repo to origin/main"
-boxd exec "${VM_NAME}" --timeout "${VM_TIMEOUT_SECS}" -- \
-  bash -lc "set -e; cd ${WORKDIR} && git fetch origin && git reset --hard origin/main && npm install --prefer-offline --no-audit --no-fund 2>&1 | tail -3"
+exec_in_vm "set -e; cd ${WORKDIR} && git fetch origin && git reset --hard origin/main && npm install --prefer-offline --no-audit --no-fund 2>&1 | tail -3"
 echo "::endgroup::"
 
-# ── Render prompt on the runner, ship into VM ────────────────────────
-echo "::group::Write prompt"
+# ── Render prompt on runner, UploadFile into VM ──────────────────────
+echo "::group::Upload prompt"
 prompt=$(cat "${ACTION_PATH}/prompts/fix-issue.md")
 prompt="${prompt//\{\{ISSUE_NUMBER\}\}/${ISSUE_NUMBER}}"
 prompt="${prompt//\{\{ISSUE_TITLE\}\}/${ISSUE_TITLE}}"
 prompt="${prompt//\{\{ISSUE_BODY\}\}/${ISSUE_BODY}}"
-tmp_prompt="${RUNNER_TEMP}/prompt.md"
-printf '%s' "${prompt}" > "${tmp_prompt}"
-boxd cp "${tmp_prompt}" "${VM_NAME}:${WORKDIR}/.claude-prompt.md"
+b64=$(printf '%s' "${prompt}" | base64 -w0)
+upload_req=$(jq -nc --arg vm "${FORK_ID}" --arg path "${WORKDIR}/.claude-prompt.md" --arg data "${b64}" '{vm_id:$vm,path:$path,data:$data}')
+grpc_call UploadFile "${upload_req}" >/dev/null
 echo "::endgroup::"
 
 # ── Run Claude ───────────────────────────────────────────────────────
 echo "::group::Run Claude"
-boxd exec "${VM_NAME}" \
-  --timeout "${VM_TIMEOUT_SECS}" \
-  -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
-  -e MAX_TURNS="${MAX_TURNS}" \
-  -- bash -lc "cd ${WORKDIR} && cat .claude-prompt.md | claude -p --max-turns \"\$MAX_TURNS\" 2>&1 | tee .claude.log"
+# Export ANTHROPIC_API_KEY in the VM via an in-shell assignment; we can't
+# pass env via the current proto's Exec, so inline it.
+exec_in_vm "cd ${WORKDIR} && export ANTHROPIC_API_KEY='${ANTHROPIC_API_KEY}' && cat .claude-prompt.md | claude -p --max-turns ${MAX_TURNS} 2>&1 | tee .claude.log"
 echo "::endgroup::"
 
-# ── Extract patch ────────────────────────────────────────────────────
+# ── Check for commits; extract patch ─────────────────────────────────
 echo "::group::Extract patch"
-commit_count=$(boxd exec "${VM_NAME}" -- \
-  bash -lc "cd ${WORKDIR} && git rev-list --count HEAD ^origin/main 2>/dev/null || echo 0" | tr -d '\r\n')
-if [[ "${commit_count}" == "0" ]]; then
+# Write patch to a file inside the VM, then DownloadFile it to the runner.
+set +e
+exec_in_vm "cd ${WORKDIR} && commits=\$(git rev-list --count HEAD ^origin/main 2>/dev/null || echo 0); echo \"commits=\$commits\"; if [[ \"\$commits\" != \"0\" ]]; then git format-patch origin/main --stdout > /tmp/claude.mbox; else : > /tmp/claude.mbox; fi; exit 0"
+set -e
+
+# Probe: did we produce a non-empty patch?
+set +e
+exec_in_vm "stat -c '%s' /tmp/claude.mbox" >/tmp/patch-size.txt 2>/dev/null
+set -e
+patch_size=$(tr -dc '0-9' </tmp/patch-size.txt || echo 0)
+echo "patch size in VM: ${patch_size:-0} bytes"
+
+if [[ -z "${patch_size}" || "${patch_size}" == "0" ]]; then
   echo "No commits produced — nothing to patch."
   echo "has-patch=false" >> "$GITHUB_OUTPUT"
   exit 0
 fi
-boxd exec "${VM_NAME}" -- \
-  bash -lc "cd ${WORKDIR} && git format-patch origin/main --stdout" > "${PATCH_LOCAL}"
+
+dl_req=$(jq -nc --arg vm "${FORK_ID}" --arg path "/tmp/claude.mbox" '{vm_id:$vm,path:$path}')
+grpc_call DownloadFile "${dl_req}" | jq -r .data | base64 -d > "${PATCH_LOCAL}"
 echo "patch-file=${PATCH_LOCAL}" >> "$GITHUB_OUTPUT"
 echo "has-patch=true" >> "$GITHUB_OUTPUT"
 echo "::endgroup::"
