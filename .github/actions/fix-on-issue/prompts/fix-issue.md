@@ -3,6 +3,10 @@ The working directory is `/home/boxd/boxd-action-demo`. It's already
 synced to origin/main with dependencies installed. You are user `boxd`
 (uid 1000), with `sudo` available if you need it.
 
+The app's dev server is already running on http://localhost:3000 inside
+this VM (live-forked from the golden), and Google Chrome is installed
+at `/usr/bin/google-chrome`.
+
 # The issue
 
 Title: {{ISSUE_TITLE}}
@@ -17,20 +21,47 @@ Body:
 # Your job
 
 1. Read the codebase and understand the issue.
-2. Make the minimal change required to fix it.
-3. Add or update at least one test that would have caught the bug. The test
-   runner is already wired (`npm test` runs vitest + supertest).
-4. Run `npm test` and do not finish until it passes. If you cannot make it
-   pass, stop and explain why in a final message.
-5. Commit your changes on the current branch with a descriptive message.
+2. **If this is a frontend / UI change** (edits to `public/` or anything
+   visible in the browser), capture a "before" screenshot first:
+   ```bash
+   mkdir -p .claude-screenshots
+   /usr/bin/google-chrome --headless --disable-gpu --no-sandbox \
+     --screenshot=.claude-screenshots/before.png --window-size=1280,800 \
+     http://localhost:3000
+   ```
+3. Make the minimal change required to fix it.
+4. Add or update at least one test that would have caught the bug. The
+   test runner is already wired (`npm test` runs vitest + supertest).
+5. Run `npm test` and do not finish until it passes. If you can't make
+   it pass, stop and explain in your final message.
+6. **For frontend changes**, re-serve and capture an "after" screenshot:
+   - If your fix touched `public/*` only, no restart needed — Express
+     serves them dynamically.
+   - If your fix touched `server.js`, restart:
+     ```bash
+     pkill -f "node server.js" || true
+     (cd /home/boxd/boxd-action-demo && setsid nohup npm start >/tmp/server.log 2>&1 </dev/null &)
+     sleep 2
+     curl -sf http://localhost:3000/api/notes >/dev/null   # sanity
+     ```
+   - Then:
+     ```bash
+     /usr/bin/google-chrome --headless --disable-gpu --no-sandbox \
+       --screenshot=.claude-screenshots/after.png --window-size=1280,800 \
+       http://localhost:3000
+     ```
+7. Commit your changes on the current branch with a descriptive message.
    Use `git add -A && git commit -m "..."`. Subject line:
    `fix: <short description> (closes #{{ISSUE_NUMBER}})`.
-6. Do NOT open a PR. Do NOT push. The caller will handle that.
+8. Do NOT open a PR. Do NOT push. The caller will handle that.
+
+If you need deeper browser inspection (clicking, console logs, network
+requests), use the `chrome-devtools` MCP tools instead of headless CLI.
 
 # Constraints
 
 - Do not modify unrelated files.
-- Keep the commit focused.
+- Keep the commit focused. Screenshots go in `.claude-screenshots/`.
 - If the issue is ambiguous or you cannot make progress, commit whatever
   partial work makes sense (with a clear message) and explain blockers.
 

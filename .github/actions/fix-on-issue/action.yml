@@ -118,9 +118,39 @@ runs:
         git checkout -b "$BRANCH_NAME"
         git am "$PATCH_FILE"
         git push --force-with-lease origin "$BRANCH_NAME"
+
+        # If Claude saved before/after screenshots on this branch, embed them.
+        shots=""
+        raw_base="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${BRANCH_NAME}"
+        if git cat-file -e "${BRANCH_NAME}:.claude-screenshots/before.png" 2>/dev/null \
+          && git cat-file -e "${BRANCH_NAME}:.claude-screenshots/after.png" 2>/dev/null; then
+          shots=$(cat <<MD
+
+### Visual diff
+
+| Before | After |
+|:---:|:---:|
+| ![before](${raw_base}/.claude-screenshots/before.png) | ![after](${raw_base}/.claude-screenshots/after.png) |
+MD
+)
+        elif git cat-file -e "${BRANCH_NAME}:.claude-screenshots/after.png" 2>/dev/null; then
+          shots=$(cat <<MD
+
+### Screenshot
+
+![after](${raw_base}/.claude-screenshots/after.png)
+MD
+)
+        fi
+
+        body=$(cat <<MD
+Closes #$ISSUE_NUMBER. Authored by Claude Code in a boxd VM.
+${shots}
+MD
+)
         pr_url=$(gh pr create \
           --title "Claude: fix #$ISSUE_NUMBER — $ISSUE_TITLE" \
-          --body "Closes #$ISSUE_NUMBER. Authored by Claude Code in a boxd VM." \
+          --body "$body" \
           --head "$BRANCH_NAME")
         echo "pr-url=$pr_url" >> "$GITHUB_OUTPUT"
 
