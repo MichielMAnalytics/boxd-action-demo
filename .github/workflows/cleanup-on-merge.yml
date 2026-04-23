@@ -1,8 +1,7 @@
 name: Cleanup fork on PR close
 
 # Destroys the boxd fork VM that the fix-on-issue action kept alive.
-# Runs on merge by default; closed-without-merge leaves the VM for
-# manual triage (you can drop it by closing the issue or re-labeling).
+# Runs on any PR close — merged or abandoned — so we don't leak forks.
 
 on:
   pull_request:
@@ -10,9 +9,7 @@ on:
 
 jobs:
   cleanup:
-    if: |
-      github.event.pull_request.merged == true &&
-      startsWith(github.event.pull_request.head.ref, 'claude-fix/issue-')
+    if: startsWith(github.event.pull_request.head.ref, 'claude-fix/issue-')
     runs-on: ubuntu-latest
     steps:
       - name: Install grpcurl
