@@ -117,7 +117,7 @@ runs:
         git config user.email "boxd-bot@users.noreply.github.com"
         git checkout -b "$BRANCH_NAME"
         git am "$PATCH_FILE"
-        git push origin "$BRANCH_NAME"
+        git push --force-with-lease origin "$BRANCH_NAME"
         pr_url=$(gh pr create \
           --title "Claude: fix #$ISSUE_NUMBER — $ISSUE_TITLE" \
           --body "Closes #$ISSUE_NUMBER. Authored by Claude Code in a boxd VM." \

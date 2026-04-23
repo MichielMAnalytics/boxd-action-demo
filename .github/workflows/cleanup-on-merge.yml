@@ -7,11 +7,20 @@ on:
   pull_request:
     types: [closed]
 
+permissions:
+  contents: write
+
 jobs:
   cleanup:
     if: startsWith(github.event.pull_request.head.ref, 'claude-fix/issue-')
     runs-on: ubuntu-latest
     steps:
+      - name: Delete the PR branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/${HEAD_REF}" || true
       - name: Install grpcurl
         run: |
           curl -fsSL -o /tmp/grpcurl.tar.gz \
