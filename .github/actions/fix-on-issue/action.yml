@@ -124,8 +124,11 @@ runs:
           --head "$BRANCH_NAME")
         echo "pr-url=$pr_url" >> "$GITHUB_OUTPUT"
 
-    - name: Destroy fork (always)
-      if: always() && steps.create-vm.outputs.fork-id != ''
+    # Only destroy here on failure or when Claude produced no patch.
+    # On success-with-PR, leave the fork alive so reviewers can poke at it.
+    # The cleanup-on-merge workflow destroys it when the PR lands.
+    - name: Destroy fork (on failure or no-patch)
+      if: steps.create-vm.outputs.fork-id != '' && (failure() || steps.create-vm.outputs.has-patch != 'true')
       shell: bash
       run: |
         set -eu

@@ -13,7 +13,7 @@ set -euo pipefail
 : "${MAX_TURNS:=40}"
 : "${ACTION_PATH:?}"
 
-VM_NAME="claude-fix-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+VM_NAME="claude-fix-issue-${ISSUE_NUMBER}"
 WORKDIR="/home/boxd/boxd-action-demo"
 PATCH_LOCAL="${RUNNER_TEMP}/claude.mbox"
 
@@ -62,6 +62,15 @@ GOLDEN_ID=$(grpc_call ListVms '{}' | jq -r --arg n "${GOLDEN_VM}" '.vms[] | sele
 [[ -n "${GOLDEN_ID}" ]] || { echo "golden VM '${GOLDEN_VM}' not found"; exit 1; }
 echo "golden_id=${GOLDEN_ID}"
 echo "::endgroup::"
+
+# ── Clean up any stale fork for this issue (re-labeled) ──────────────
+existing_id=$(grpc_call ListVms '{}' | jq -r --arg n "${VM_NAME}" '.vms[] | select(.name==$n) | .vmId')
+if [[ -n "${existing_id}" ]]; then
+  echo "::notice::existing VM ${VM_NAME} (${existing_id}) found — destroying before re-fork"
+  dr=$(jq -nc --arg id "${existing_id}" '{vm_id:$id}')
+  grpc_call DestroyVm "${dr}" >/dev/null
+  sleep 2
+fi
 
 # ── Fork golden ──────────────────────────────────────────────────────
 echo "::group::Fork → ${VM_NAME}"
