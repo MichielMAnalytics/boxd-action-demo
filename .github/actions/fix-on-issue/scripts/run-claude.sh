@@ -19,6 +19,13 @@ PATCH_LOCAL="${RUNNER_TEMP}/claude.mbox"
 
 echo "vm-name=${VM_NAME}" >> "$GITHUB_OUTPUT"
 
+# Public URL pattern: <vm-name>.<api-host>. The platform's default
+# proxy routes the apex domain to the primary web port on the VM.
+API_HOST="${BOXD_GRPC_HOST%:9443}"
+PREVIEW_URL="https://${VM_NAME}.${API_HOST}"
+echo "preview-url=${PREVIEW_URL}" >> "$GITHUB_OUTPUT"
+echo "preview at ${PREVIEW_URL}"
+
 # ── gRPC helpers ─────────────────────────────────────────────────────
 
 grpc_call() {

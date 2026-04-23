@@ -111,6 +111,7 @@ runs:
         ISSUE_TITLE: ${{ github.event.issue.title }}
         PATCH_FILE: ${{ steps.create-vm.outputs.patch-file }}
         BRANCH_NAME: claude-fix/issue-${{ github.event.issue.number }}
+        PREVIEW_URL: ${{ steps.create-vm.outputs.preview-url }}
       run: |
         set -euo pipefail
         git config user.name "boxd-bot"
@@ -129,6 +130,9 @@ runs:
           shots=$(printf '\n### Screenshot\n\n![after](%s/.claude-screenshots/after.png)\n' "$raw_base")
         fi
         body="Closes #$ISSUE_NUMBER. Authored by Claude Code in a boxd VM."
+        if [[ -n "${PREVIEW_URL:-}" ]]; then
+          body="${body}"$'\n\n'"**Live preview** (boxd fork): ${PREVIEW_URL}"
+        fi
         [[ -n "$shots" ]] && body="${body}"$'\n'"${shots}"
 
         pr_url=$(gh pr create \
